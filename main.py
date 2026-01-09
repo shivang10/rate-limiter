@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.params import Depends
 
-from redis_session import connect_async_redis, close_redis
+from db.redis_session import connect_async_redis, close_redis
+from dependencies.token_bucket_rate_limit_dependency import token_bucket_rate_limit_dependency
 
 
 @asynccontextmanager
@@ -15,6 +17,6 @@ async def lifespan(app_: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/")
-def main():
-    return "Rate Limiter"
+@app.get("/token-bucket")
+def token_bucket(dep=Depends(token_bucket_rate_limit_dependency)):
+    return "message: TokenBucketOk"
