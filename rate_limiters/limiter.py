@@ -15,8 +15,8 @@ def get_token_bucket() -> TokenBucketImpl:
 
         _token_bucket = TokenBucketImpl(
             redis_client=redis_db.async_client,
-            rate=1,
-            bucket=5,
+            refill_rate=1,
+            bucket_capacity=5,
             ttl_seconds=10,
             cost=1
         )
