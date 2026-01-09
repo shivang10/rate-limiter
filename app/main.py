@@ -1,4 +1,5 @@
 import logging
+import socket
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, status
@@ -52,7 +53,8 @@ async def health():
 async def token_bucket():
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={"message": "Request successful"}
+        content={"message": "Request successful",
+                 "handled_by_container": socket.gethostname()}
     )
 
 
