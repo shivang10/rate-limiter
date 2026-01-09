@@ -16,9 +16,8 @@ logger = logging.getLogger(__name__)
 
 class Redis:
     async_client: Optional[redis_asyncio.Redis] = None
+    token_bucket_sha: str | None = None
 
-
-TOKEN_BUCKET_LUA = load_lua_script("token_bucket.lua")
 
 token_bucket_sha: str | None = None
 redis_db = Redis()
@@ -37,16 +36,8 @@ async def connect_async_redis():
             socket_timeout=5,
             socket_connect_timeout=5
         )
-        global token_bucket_sha
-
         await redis_db.async_client.ping()
         logger.info("Asynchronous Redis connection successful")
-        token_bucket_sha = await redis_db.async_client.script_load(TOKEN_BUCKET_LUA)
-        logger.info(
-            f"Token bucket lua script loaded with SHA: {token_bucket_sha}")
-
-        if token_bucket_sha is None:
-            raise
         return redis_db.async_client
 
     except socket.gaierror as e:
