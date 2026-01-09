@@ -1,28 +1,69 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.params import Depends
-
-from db.lua import load_lua_script
+from fastapi import FastAPI, Depends, status
+from fastapi.responses import JSONResponse
 
 from db.redis_session import connect_async_redis, close_redis, redis_db
 from dependencies.token_bucket_rate_limit_dependency import token_bucket_rate_limit_dependency
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    await connect_async_redis()
-    lua_script = load_lua_script("token_bucket.lua")
-    redis_db.token_bucket_lua_sha = await redis_db.async_client.script_load(
-        lua_script
-    )
+    logger.info("Starting application...")
+    try:
+        await connect_async_redis()
+        logger.info("Application startup complete")
+    except Exception as e:
+        logger.error(f"Failed to start application: {e}")
+        raise
+
     yield
+
+    logger.info("Shutting down application...")
     await close_redis()
+    logger.info("Application shutdown complete")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Rate Limiter API",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 
-@app.get("/token-bucket")
-def token_bucket(dep=Depends(token_bucket_rate_limit_dependency)):
-    return "message: TokenBucketOk"
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "redis_connected": redis_db.async_client is not None,
+        "script_loaded": redis_db.token_bucket_lua_sha is not None,
+        "script_sha": redis_db.token_bucket_lua_sha
+    }
+
+
+@app.get("/token-bucket", dependencies=[Depends(token_bucket_rate_limit_dependency)])
+async def token_bucket():
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"message": "Request successful"}
+    )
+
+
+@app.exception_handler(429)
+async def rate_limit_handler(request, exc):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "Rate limit exceeded",
+            "message": str(exc.detail),
+            "retry_after": "1 second"
+        },
+        headers={"Retry-After": "1"}
+    )

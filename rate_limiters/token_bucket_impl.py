@@ -1,10 +1,12 @@
+import logging
 import time
 
 import redis
 
-from db.redis_session import redis_db, token_bucket_sha
-
+from db.redis_session import redis_db, TOKEN_BUCKET_LUA
 from rate_limiters.rate_limiter_base import RateLimiterBase
+
+logger = logging.getLogger(__name__)
 
 
 class TokenBucketImpl(RateLimiterBase):
@@ -15,18 +17,49 @@ class TokenBucketImpl(RateLimiterBase):
         self.ttl_seconds = ttl_seconds or int(bucket_capacity / refill_rate)
         self.cost = cost
 
-    async def allow_request(self, key: str = None):
+    async def allow_request(self, key: str) -> bool:
+        if not key:
+            logger.warning("Rate limit check called with empty key")
+            return False
+
         now = int(time.time())
 
-        result = await redis_db.async_client.evalsha(
-            redis_db.token_bucket_lua_sha,
-            1,
-            key,
-            self.bucket_capacity,
-            self.refill_rate,
-            now,
-            self.cost,
-            self.ttl_seconds,
-        )
-        allowed, _ = result
+        try:
+            result = await redis_db.async_client.evalsha(
+                redis_db.token_bucket_lua_sha,
+                1,
+                key,
+                self.bucket_capacity,
+                self.refill_rate,
+                now,
+                self.cost,
+                self.ttl_seconds,
+            )
+        except redis.exceptions.NoScriptError:
+            logger.warning("Lua script not found in Redis, reloading...")
+            redis_db.token_bucket_lua_sha = await redis_db.async_client.script_load(TOKEN_BUCKET_LUA)
+
+            result = await redis_db.async_client.evalsha(
+                redis_db.token_bucket_lua_sha,
+                1,
+                key,
+                self.bucket_capacity,
+                self.refill_rate,
+                now,
+                self.cost,
+                self.ttl_seconds,
+            )
+        except redis.exceptions.RedisError as e:
+            logger.error(f"Redis error during rate limit check: {e}")
+            return True
+        except Exception as e:
+            logger.error(f"Unexpected error during rate limit check: {e}")
+            return True
+
+        allowed, remaining_tokens = result
+
+        if allowed == 0:
+            logger.debug(
+                f"Rate limit exceeded for key: {key}, remaining tokens: {remaining_tokens}")
+
         return allowed == 1
