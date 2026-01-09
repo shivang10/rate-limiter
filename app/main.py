@@ -4,8 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, status
 from fastapi.responses import JSONResponse
 
-from db.redis_session import connect_async_redis, close_redis, redis_db
-from dependencies.token_bucket_rate_limit_dependency import token_bucket_rate_limit_dependency
+from app.db.redis_session import connect_async_redis, close_redis, redis_db
+from app.dependencies.token_bucket_rate_limit_dependency import token_bucket_rate_limit_dependency
 
 logging.basicConfig(
     level=logging.INFO,

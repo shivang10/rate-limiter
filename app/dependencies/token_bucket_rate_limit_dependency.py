@@ -2,8 +2,8 @@ import logging
 
 from fastapi import Request, HTTPException, status
 
-from rate_limiters.key_builder import get_user_key
-from rate_limiters.limiter import get_token_bucket
+from app.rate_limiters.key_builder import get_user_key
+from app.rate_limiters.limiter import get_token_bucket
 
 logger = logging.getLogger(__name__)
 

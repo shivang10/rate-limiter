@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     class Config:
-        env_file = ".env"
+        env_file = "../.env"
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"

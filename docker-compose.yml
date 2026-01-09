@@ -4,7 +4,7 @@ services:
   rate_limiter:
     build:
       context: .
-      dockerfile: ./Dockerfile
+      dockerfile: docker/rate_limiter.Dockerfile
     container_name: rate_limiter
     hostname: rate_limiter
     ports:
@@ -34,6 +34,18 @@ services:
       retries: 5
       interval: 5s
       start_period: 10s
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx.Dockerfile
+    container_name: nginx
+    hostname: nginx
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      - rate_limiter
+    networks:
+      - my-net
 
 volumes:
   redis_data:
