@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  rate_limiter:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: rate_limiter
+    hostname: rate_limiter
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+  redis:
+    image: redis:alpine
+    hostname: redis
+    container_name: redis
+    restart: on-failure
+    ports:
+      - "${REDIS_PORT}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - my-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 5s
+      retries: 5
+      interval: 5s
+      start_period: 10s
+
+volumes:
+  redis_data:
+  cache:
+    driver: local
+
+networks:
+  my-net:
+    driver: bridge
