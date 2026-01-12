@@ -25,6 +25,10 @@ class TokenBucketImpl(RateLimiterBase):
         now = int(time.time())
 
         try:
+            # node_info = await self._get_node_for_key(key)
+            node_info = await redis_db.async_client.cluster_keyslot(key)
+            logger.info(f"Key '{key}' will be handled by node: {node_info}")
+
             result = await redis_db.async_client.evalsha(
                 redis_db.token_bucket_lua_sha,
                 1,

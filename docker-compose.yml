@@ -10,8 +10,8 @@ services:
     networks:
       - my-net
     depends_on:
-      redis:
-        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
     deploy:
       mode: replicated
       replicas: 3
@@ -22,24 +22,102 @@ services:
         reservations:
           cpus: "0.25"
           memory: 256M
-  redis:
-    image: redis:alpine
-    hostname: redis
-    container_name: redis
     restart: on-failure
-    ports:
-      - "${REDIS_PORT}:${REDIS_PORT}"
-    command: redis-server --appendonly yes
+
+  redis-node-1:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
     volumes:
-      - redis_data:/data
+      - redis_data_1:/data
     networks:
       - my-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      timeout: 5s
-      retries: 5
       interval: 5s
-      start_period: 10s
+      timeout: 3s
+      retries: 5
+
+  redis-node-2:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    volumes:
+      - redis_data_2:/data
+    networks:
+      - my-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  redis-node-3:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    volumes:
+      - redis_data_3:/data
+    networks:
+      - my-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  redis-node-4:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    volumes:
+      - redis_data_4:/data
+    networks:
+      - my-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  redis-node-5:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    volumes:
+      - redis_data_5:/data
+    networks:
+      - my-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  redis-node-6:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    volumes:
+      - redis_data_6:/data
+    networks:
+      - my-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  redis-cluster-init:
+    image: redis:7-alpine
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+      redis-node-4:
+        condition: service_healthy
+      redis-node-5:
+        condition: service_healthy
+      redis-node-6:
+        condition: service_healthy
+    networks:
+      - my-net
+    command: >
+      sh -c "
+      echo 'Creating Redis cluster...' &&
+      redis-cli --cluster create
+      redis-node-1:6379
+      redis-node-2:6379
+      redis-node-3:6379
+      redis-node-4:6379
+      redis-node-5:6379
+      redis-node-6:6379
+      --cluster-replicas 1 --cluster-yes
+      "
+    restart: "no"
+
   nginx:
     build:
       context: .
@@ -54,7 +132,12 @@ services:
       - my-net
 
 volumes:
-  redis_data:
+  redis_data_1:
+  redis_data_2:
+  redis_data_3:
+  redis_data_4:
+  redis_data_5:
+  redis_data_6:
   cache:
     driver: local
 

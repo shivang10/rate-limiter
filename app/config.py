@@ -3,10 +3,22 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Redis configuration
-    redis_host: str
-    redis_port: int
+    # redis_host: str
+    # redis_port: int
     redis_db: int = 0
     redis_password: str
+    redis_host_node_1: str
+    redis_port_node_1: int
+    redis_host_node_2: str
+    redis_port_node_2: int
+    redis_host_node_3: str
+    redis_port_node_3: int
+    redis_host_node_4: str
+    redis_port_node_4: int
+    redis_host_node_5: str
+    redis_port_node_5: int
+    redis_host_node_6: str
+    redis_port_node_6: int
 
     # Application settings
     app_name: str = "100k Rate Limiter"

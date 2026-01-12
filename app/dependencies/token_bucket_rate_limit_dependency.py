@@ -17,6 +17,13 @@ async def token_bucket_rate_limit_dependency(request: Request):
             detail="user_id header is required"
         )
 
+    if not user_id:
+        logger.warning("Rate limit check attempted without user_id header")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id header is required"
+        )
+
     key = get_user_key(user_id)
     token_bucket_limiter = get_token_bucket()
 
