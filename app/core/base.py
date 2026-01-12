@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 
-class RateLimiterBase(ABC):
+class RateLimiterStrategy(ABC):
     @abstractmethod
-    def allow_request(self, key: str):
+    async def is_request_allowed(self, key: str) -> bool:
         pass

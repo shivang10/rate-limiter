@@ -2,13 +2,13 @@ import socket
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.api.routes.dependencies.token_bucket_dependency import token_bucket_rate_limit_dependency
+from app.api.routes.dependencies.token_bucket_dependency import enforce_rate_limit
 
 router = APIRouter(tags=["rate-limited"])
 
 
-@router.get("/token-bucket", dependencies=[Depends(token_bucket_rate_limit_dependency)])
-async def token_bucket_endpoint():
+@router.get("/token-bucket", dependencies=[Depends(enforce_rate_limit)])
+async def rate_limited_endpoint():
     return JSONResponse(
         content={
             "message": "Request successful",

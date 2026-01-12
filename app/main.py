@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-from app.database.redis import connect_async_redis, close_redis
+from app.database.redis import connect_redis, disconnect_redis
 from app.api.routes import health, token_bucket_route
 
 logging.basicConfig(
@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app_: FastAPI):
+async def application_lifespan(app_: FastAPI):
     logger.info("Starting application...")
     try:
-        await connect_async_redis()
+        await connect_redis()
         logger.info("Application startup complete")
     except Exception as e:
         logger.error(f"Failed to start: {e}", exc_info=True)
@@ -26,13 +26,13 @@ async def lifespan(app_: FastAPI):
     yield
 
     logger.info("Shutting down...")
-    await close_redis()
+    await disconnect_redis()
 
 
 app = FastAPI(
     title="Rate Limiter API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=application_lifespan
 )
 
 # Include routers

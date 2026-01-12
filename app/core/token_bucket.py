@@ -3,21 +3,22 @@ import time
 
 import redis
 
-from app.database.redis import redis_db, TOKEN_BUCKET_LUA
-from app.core.base import RateLimiterBase
+from app.database.redis import redis_connection, TOKEN_BUCKET_SCRIPT
+from app.core.base import RateLimiterStrategy
 
 logger = logging.getLogger(__name__)
 
 
-class TokenBucketImpl(RateLimiterBase):
-    def __init__(self, refill_rate: int, bucket_capacity: int, redis_client: redis.Redis, ttl_seconds: int, cost: int):
-        self.refill_rate = refill_rate
-        self.bucket_capacity = bucket_capacity
+class TokenBucketRateLimiter(RateLimiterStrategy):
+    def __init__(self, tokens_per_second: int, max_tokens: int, redis_client: redis.Redis, expiry_seconds: int, tokens_per_request: int):
+        self.tokens_per_second = tokens_per_second
+        self.max_tokens = max_tokens
         self.redis_client = redis_client
-        self.ttl_seconds = ttl_seconds or int(bucket_capacity / refill_rate)
-        self.cost = cost
+        self.expiry_seconds = expiry_seconds or int(
+            max_tokens / tokens_per_second)
+        self.tokens_per_request = tokens_per_request
 
-    async def allow_request(self, key: str) -> bool:
+    async def is_request_allowed(self, key: str) -> bool:
         if not key:
             logger.warning("Rate limit check called with empty key")
             return False
@@ -26,32 +27,34 @@ class TokenBucketImpl(RateLimiterBase):
 
         try:
             # node_info = await self._get_node_for_key(key)
-            node_info = await redis_db.async_client.cluster_keyslot(key)
+            node_info = await redis_connection.async_client.cluster_keyslot(key)
             logger.info(f"Key '{key}' will be handled by node: {node_info}")
 
-            result = await redis_db.async_client.evalsha(
-                redis_db.token_bucket_lua_sha,
+            result = await redis_connection.async_client.evalsha(
+                redis_connection.script_shas['token_bucket'],
                 1,
                 key,
-                self.bucket_capacity,
-                self.refill_rate,
+                self.max_tokens,
+                self.tokens_per_second,
                 now,
-                self.cost,
-                self.ttl_seconds,
+                self.tokens_per_request,
+                self.expiry_seconds,
             )
         except redis.exceptions.NoScriptError:
-            logger.warning("Lua script not found in Redis, reloading...")
-            redis_db.token_bucket_lua_sha = await redis_db.async_client.script_load(TOKEN_BUCKET_LUA)
+            logger.warning(
+                "Token bucket script not found in Redis, reloading...")
+            token_bucket_sha = await redis_connection.async_client.script_load(TOKEN_BUCKET_SCRIPT)
+            redis_connection.script_shas['token_bucket'] = token_bucket_sha
 
-            result = await redis_db.async_client.evalsha(
-                redis_db.token_bucket_lua_sha,
+            result = await redis_connection.async_client.evalsha(
+                redis_connection.script_shas['token_bucket'],
                 1,
                 key,
-                self.bucket_capacity,
-                self.refill_rate,
+                self.max_tokens,
+                self.tokens_per_second,
                 now,
-                self.cost,
-                self.ttl_seconds,
+                self.tokens_per_request,
+                self.expiry_seconds,
             )
         except redis.exceptions.RedisError as e:
             logger.error(f"Redis error during rate limit check: {e}")
