@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from app.db.redis_session import redis_db
-from .token_bucket_impl import TokenBucketImpl
+from app.database.redis import redis_db
+from .token_bucket import TokenBucketImpl
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import redis.asyncio as redis_asyncio
 from fastapi import HTTPException, status
 
 from app.config import settings
-from app.db.lua import load_lua_script
+from app.database.lua import load_lua_script
 
 logger = logging.getLogger(__name__)
 

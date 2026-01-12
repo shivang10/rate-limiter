@@ -3,8 +3,8 @@ import time
 
 import redis
 
-from app.db.redis_session import redis_db, TOKEN_BUCKET_LUA
-from app.rate_limiters.rate_limiter_base import RateLimiterBase
+from app.database.redis import redis_db, TOKEN_BUCKET_LUA
+from app.core.base import RateLimiterBase
 
 logger = logging.getLogger(__name__)
 
