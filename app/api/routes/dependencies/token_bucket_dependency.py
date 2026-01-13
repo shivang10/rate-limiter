@@ -31,5 +31,6 @@ async def enforce_rate_limit(request: Request):
         logger.info(f"Rate limit exceeded for user: {user_id}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Please try again later."
+            detail="Rate limit exceeded. Please try again later.",
+            headers={"Retry-After": "1"}
         )
