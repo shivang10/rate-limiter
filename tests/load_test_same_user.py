@@ -2,13 +2,28 @@ import asyncio
 import aiohttp
 import time
 import os
+import sys
 from dotenv import load_dotenv
 from collections import Counter
 
 load_dotenv()
 
-URL = os.getenv("API_URL", "http://0.0.0.0:80/token-bucket")
-TOTAL_REQUESTS = 2000
+# Get algorithm from command line argument or environment variable
+ALGORITHM = sys.argv[1] if len(sys.argv) > 1 else os.getenv(
+    "RATE_LIMIT_ALGORITHM", "token-bucket")
+
+# Map algorithm names to endpoints
+ENDPOINTS = {
+    "token-bucket": "/token-bucket",
+    "sliding-window": "/sliding-window-counter",
+    "sliding-window-counter": "/sliding-window-counter"
+}
+
+BASE_URL = os.getenv("BASE_URL", "http://0.0.0.0:80")
+ENDPOINT = ENDPOINTS.get(ALGORITHM, "/token-bucket")
+URL = f"{BASE_URL}{ENDPOINT}"
+
+TOTAL_REQUESTS = 20000
 CONCURRENCY = 200
 USER_ID = "user-123"
 
@@ -23,6 +38,11 @@ async def hit(session, i):
 
 
 async def main():
+    print(f"Testing endpoint: {URL}")
+    print(f"Algorithm: {ALGORITHM}")
+    print(f"Total requests: {TOTAL_REQUESTS}, Concurrency: {CONCURRENCY}")
+    print("-" * 50)
+
     connector = aiohttp.TCPConnector(limit=CONCURRENCY)
     async with aiohttp.ClientSession(connector=connector) as session:
         start = time.time()
@@ -33,8 +53,9 @@ async def main():
         elapsed = time.time() - start
 
     counts = Counter(results)
-    print("Results:", counts)
+    print("\nResults:", counts)
     print("Elapsed:", round(elapsed, 2), "seconds")
+    print(f"Throughput: {round(TOTAL_REQUESTS / elapsed, 2)} req/s")
 
 if __name__ == "__main__":
     asyncio.run(main())
