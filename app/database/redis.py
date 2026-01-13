@@ -22,6 +22,7 @@ class RedisConnection:
 
 
 TOKEN_BUCKET_SCRIPT = load_lua_script("token_bucket.lua")
+SLIDING_WINDOW_COUNTER_SCRIPT = load_lua_script("sliding_window_counter.lua")
 redis_connection = RedisConnection()
 
 
@@ -66,6 +67,11 @@ async def connect_redis():
         redis_connection.script_shas['token_bucket'] = token_bucket_sha
         logger.info(
             f"Token bucket Lua script loaded with SHA: {token_bucket_sha}")
+
+        sliding_window_counter_sha = await redis_connection.async_client.script_load(SLIDING_WINDOW_COUNTER_SCRIPT)
+        redis_connection.script_shas['sliding_window_counter'] = sliding_window_counter_sha
+        logger.info(
+            f"Sliding window counter Lua script loaded with SHA: {sliding_window_counter_sha}")
 
         return redis_connection.async_client
 
