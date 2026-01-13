@@ -38,7 +38,7 @@
 
 ## 🎯 Overview
 
-A **distributed rate limiting system** built with FastAPI and Redis Cluster that implements the **Token Bucket algorithm** to throttle API requests per user. Designed for high concurrency with horizontal scalability, atomic operations, and sub-millisecond response times.
+A **distributed rate limiting system** built with FastAPI and Redis Cluster that implements **two powerful rate limiting algorithms**: **Token Bucket** and **Sliding Window Counter** to throttle API requests per user. Designed for high concurrency with horizontal scalability, atomic operations, and sub-millisecond response times.
 
 ### Key Capabilities
 
@@ -48,6 +48,7 @@ A **distributed rate limiting system** built with FastAPI and Redis Cluster that
 - 📊 **Horizontal scaling** via Docker Swarm/Kubernetes
 - 🎯 **User-based** rate limiting with customizable limits
 - 🚀 **Production-ready** with health checks and monitoring
+- 🎨 **Dual algorithms** - Token Bucket & Sliding Window Counter
 
 ---
 
@@ -58,6 +59,7 @@ A **distributed rate limiting system** built with FastAPI and Redis Cluster that
 | Feature | Description |
 |---------|-------------|
 | **Token Bucket Algorithm** | Smooth rate limiting with burst capacity |
+| **Sliding Window Counter** | Accurate time-based rate limiting |
 | **Atomic Operations** | Lua scripts prevent race conditions |
 | **Redis Cluster** | 3 master + 3 replica nodes for HA |
 | **Load Balancing** | Nginx distributes traffic across replicas |
@@ -198,9 +200,17 @@ sequenceDiagram
 
 ## 🔍 How It Works
 
-### Token Bucket Algorithm
+### Rate Limiting Algorithms
 
-The system uses a **Token Bucket** algorithm for smooth rate limiting:
+This system implements **two complementary rate limiting algorithms**, each optimized for different use cases:
+
+---
+
+### 1. Token Bucket Algorithm
+
+The **Token Bucket** algorithm provides smooth rate limiting with burst capacity, ideal for APIs that need to allow occasional traffic spikes while maintaining long-term rate limits.
+
+#### How It Works
 
 ```
 Initial State:
@@ -222,18 +232,20 @@ After 1 second (refill rate = 1 token/sec):
 └─────────────────┘
 ```
 
-**Parameters** (configurable in [`app/core/factory.py`](app/core/factory.py)):
+#### Parameters
+
+Configurable in [`app/core/factory.py`](app/core/factory.py):
 
 ```python
-max_tokens = 5              # Bucket capacity (burst allowance)
-tokens_per_second = 1       # Refill rate
-tokens_per_request = 1      # Cost per request
-expiry_seconds = 10         # Key TTL
+TokenBucketRateLimiter(
+    max_tokens=5,              # Bucket capacity (burst size)
+    tokens_per_second=1,       # Refill rate
+    tokens_per_request=1,      # Cost per request
+    expiry_seconds=10          # Key TTL
+)
 ```
 
-### Lua Script Execution
-
-Rate limiting logic runs **atomically** in Redis:
+#### Lua Script Logic
 
 ```lua
 -- 1. Retrieve current state
@@ -255,11 +267,162 @@ redis.call("HSET", key, "tokens", tokens, "timestamp", now)
 return {1, tokens}  -- ✅ ALLOWED
 ```
 
-**Why Lua?**
+#### Use Cases
+
+| Scenario | Configuration | Behavior |
+|----------|--------------|----------|
+| **API Gateway** | max=100, rate=50/s | Allows 100 burst, 50 sustained |
+| **Login Protection** | max=5, rate=1/s | 5 attempts, then 1 per second |
+| **File Upload** | max=10, rate=2/s | 10 immediate uploads, then throttled |
+| **Rate Tier - Free** | max=10, rate=5/s | Generous burst, moderate sustained |
+| **Rate Tier - Premium** | max=1000, rate=100/s | High burst, high sustained |
+
+---
+
+### 2. Sliding Window Counter Algorithm
+
+The **Sliding Window Counter** algorithm provides accurate, time-based rate limiting without the "reset window" problem of fixed window counters. It smoothly transitions between time windows for precise rate control.
+
+#### How It Works
+
+```
+Window Size: 60 seconds, Max Requests: 10
+
+Time: 00:00 - 01:00 (Window 1)
+┌──────────────────────────┐
+│ ████████████████         │  ← 8 requests
+│ Current Window: 8/10     │
+└──────────────────────────┘
+
+Time: 00:30 (Between windows)
+┌──────────┬───────────────┐
+│ Previous │  Current      │
+│   8/10   │    4/10       │
+└──────────┴───────────────┘
+Effective count = 4 + (8 × 50%) = 8 requests
+
+Time: 00:45 (75% into new window)
+┌──────────┬───────────────┐
+│ Previous │  Current      │
+│   8/10   │    6/10       │
+└──────────┴───────────────┘
+Effective count = 6 + (8 × 25%) = 8 requests
+```
+
+#### Algorithm Formula
+
+```
+effective_count = current_count + (previous_count × (1 - window_elapsed_ratio))
+
+where:
+- current_count: Requests in current window
+- previous_count: Requests in previous window
+- window_elapsed_ratio: How far into current window (0.0 to 1.0)
+```
+
+#### Parameters
+
+Configurable in [`app/core/factory.py`](app/core/factory.py):
+
+```python
+SlidingWindowCounterRateLimiter(
+    window_size_seconds=60,    # Time window duration
+    max_requests=10,           # Max requests per window
+    expiry_seconds=60          # Key TTL
+)
+```
+
+#### Lua Script Logic
+
+```lua
+-- 1. Calculate current window
+current_window = math.floor(now / window_size)
+
+-- 2. Retrieve stored data
+current_count, previous_count, stored_window = 
+    redis.call("HMGET", key, "current_count", "previous_count", "window")
+
+-- 3. Handle window transitions
+if current_window ~= stored_window then
+    if current_window == stored_window + 1 then
+        previous_count = current_count  -- Move to next window
+    else
+        previous_count = 0              -- Skipped windows
+    end
+    current_count = 0
+end
+
+-- 4. Calculate effective count with sliding window
+window_elapsed = (now % window_size) / window_size
+effective_count = current_count + (previous_count * (1 - window_elapsed))
+
+-- 5. Check and update
+if effective_count < max_requests then
+    current_count = current_count + 1
+    redis.call("HSET", key, "current_count", current_count, 
+               "previous_count", previous_count, "window", current_window)
+    return {1, effective_count + 1}  -- ✅ ALLOWED
+else
+    return {0, effective_count}       -- ❌ DENIED
+end
+```
+
+#### Advantages
+
+- **No burst window reset**: Smoothly transitions between windows
+- **Accurate rate control**: Precise request counting over time
+- **Predictable behavior**: Users can't exploit window boundaries
+- **Memory efficient**: Only stores 3 values per key
+
+#### Use Cases
+
+| Scenario | Configuration | Behavior |
+|----------|--------------|----------|
+| **Strict API Limits** | 100 req/hour | Exactly 100 per hour, no burst |
+| **Rate Limiting SLA** | 1000 req/min | Contractual rate guarantees |
+| **Fair Usage** | 50 req/5min | Equal access for all users |
+| **Abuse Prevention** | 10 req/min | Strict DoS protection |
+| **Analytics Tracking** | 500 req/day | Daily quota enforcement |
+
+---
+
+### Algorithm Comparison
+
+| Feature | Token Bucket | Sliding Window Counter |
+|---------|-------------|----------------------|
+| **Burst Handling** | ✅ Excellent - Built-in burst capacity | ⚠️ Limited - Based on window size |
+| **Accuracy** | ⚠️ Approximate over time | ✅ Precise per time window |
+| **Memory** | 2 values (tokens, timestamp) | 3 values (current, previous, window) |
+| **Complexity** | Simple refill calculation | Sliding window calculation |
+| **Use Case** | Elastic APIs, bursty traffic | Strict quotas, SLA enforcement |
+| **User Experience** | Flexible, forgiving | Strict, predictable |
+| **CPU Usage** | Low | Slightly higher |
+
+### Choosing the Right Algorithm
+
+**Use Token Bucket when:**
+- You want to allow occasional traffic bursts
+- User experience is prioritized over strict limits
+- API should feel responsive and flexible
+- Examples: Public APIs, mobile apps, web applications
+
+**Use Sliding Window Counter when:**
+- You need precise rate control
+- Contractual SLAs must be enforced
+- Preventing abuse is critical
+- Examples: Premium APIs, rate tier enforcement, DoS protection
+
+---
+
+### Why Lua Scripts?
+
+Both algorithms execute **atomically** in Redis:
+
 - ⚛️ **Atomic**: Entire script executes as one operation
 - 🔒 **Thread-safe**: Redis is single-threaded
 - ⚡ **Fast**: Executes in < 0.1ms
 - 🚫 **No race conditions**: Multiple concurrent requests handled sequentially
+- 📊 **Consistent**: All replicas run same logic
 
 ### Concurrency Model
 
@@ -401,15 +564,18 @@ done
 
 ### Rate Limit Parameters
 
+#### Token Bucket Configuration
+
 Edit [`app/core/factory.py`](app/core/factory.py):
 
 ```python
-def get_rate_limiter():
+def get__token_bucket_rate_limiter():
     return TokenBucketRateLimiter(
-        max_tokens=10,              # Bucket capacity (burst size)
-        tokens_per_second=2,        # Refill rate
-        tokens_per_request=1,       # Cost per request
-        expiry_seconds=60           # Key TTL
+        redis_client=redis_connection.async_client,
+        max_tokens=5,              # Bucket capacity (burst size)
+        tokens_per_second=1,       # Refill rate
+        tokens_per_request=1,      # Cost per request
+        expiry_seconds=10          # Key TTL
     )
 ```
 
@@ -421,6 +587,29 @@ def get_rate_limiter():
 | **Moderate** | 10 | 5 | 10 burst, 5 req/s sustained |
 | **Generous** | 100 | 50 | 100 burst, 50 req/s sustained |
 | **API tier** | 1000 | 100 | Premium tier limits |
+
+#### Sliding Window Counter Configuration
+
+Edit [`app/core/factory.py`](app/core/factory.py):
+
+```python
+def get_sliding_window_counter_rate_limiter():
+    return SlidingWindowCounterRateLimiter(
+        redis_client=redis_connection.async_client,
+        window_size_seconds=60,    # Time window (e.g., 60s = 1 min)
+        max_requests=10,           # Max requests per window
+        expiry_seconds=60          # Key TTL
+    )
+```
+
+**Example configurations:**
+
+| Use Case | window_size | max_requests | Description |
+|----------|-------------|--------------|-------------|
+| **Per Minute** | 60 | 100 | 100 requests per minute |
+| **Per Hour** | 3600 | 1000 | 1000 requests per hour |
+| **Per Day** | 86400 | 10000 | 10k requests per day |
+| **Strict DoS** | 60 | 10 | Very strict rate limiting |
 
 ### Scaling FastAPI Replicas
 
@@ -485,7 +674,7 @@ curl http://localhost/health
 
 #### `GET /token-bucket`
 
-Rate-limited endpoint requiring `user_id` header.
+Rate-limited endpoint using **Token Bucket algorithm**, requiring `user_id` header.
 
 **Request:**
 ```bash
@@ -503,16 +692,8 @@ curl -H "user_id: user-123" http://localhost/token-bucket
 **Response (Rate Limited):**
 ```json
 {
-  "detail": "Rate limit exceeded"
+  "detail": "Rate limit exceeded. Please try again later."
 }
-```
-
-**Headers:**
-```
-X-RateLimit-Limit: 5
-X-RateLimit-Remaining: 2
-X-RateLimit-Reset: 1641234567
-Retry-After: 1
 ```
 
 **Status Codes:**
@@ -520,13 +701,18 @@ Retry-After: 1
 - `429 Too Many Requests`: Rate limit exceeded
 - `400 Bad Request`: Missing `user_id` header
 
+**Headers:**
+```
+Retry-After: 1
+```
+
 **Example with curl:**
 
 ```bash
 # Single request
 curl -i -H "user_id: user-123" http://localhost/token-bucket
 
-# Multiple requests
+# Multiple requests to test rate limiting
 for i in {1..10}; do
   echo "Request $i:"
   curl -s -w "\nHTTP Status: %{http_code}\n" \
@@ -536,16 +722,98 @@ for i in {1..10}; do
 done
 ```
 
+---
+
+#### `GET /sliding-window-counter`
+
+Rate-limited endpoint using **Sliding Window Counter algorithm**, requiring `user_id` header.
+
+**Request:**
+```bash
+curl -H "user_id: user-123" http://localhost/sliding-window-counter
+```
+
+**Response (Success):**
+```json
+{
+  "message": "Request successful",
+  "handled_by": "a1b2c3d4e567"
+}
+```
+
+**Response (Rate Limited):**
+```json
+{
+  "detail": "Rate limit exceeded. Please try again later."
+}
+```
+
+**Status Codes:**
+- `200 OK`: Request allowed
+- `429 Too Many Requests`: Rate limit exceeded
+- `400 Bad Request`: Missing `user_id` header
+
+**Headers:**
+```
+Retry-After: 60
+```
+
+**Example with curl:**
+
+```bash
+# Test sliding window algorithm
+for i in {1..15}; do
+  echo "Request $i:"
+  curl -s -w "\nHTTP Status: %{http_code}\n" \
+    -H "user_id: user-456" \
+    http://localhost/sliding-window-counter
+  sleep 1  # Wait 1 second between requests
+  echo "---"
+done
+```
+
+---
+
+### Comparing Both Endpoints
+
 **Example with Python:**
 
 ```python
 import requests
+import time
 
-headers = {"user_id": "user-123"}
-response = requests.get("http://localhost/token-bucket", headers=headers)
+def test_rate_limiter(endpoint, user_id, num_requests=15):
+    """Test a rate limiter endpoint"""
+    url = f"http://localhost/{endpoint}"
+    headers = {"user_id": user_id}
+    
+    results = {"success": 0, "rate_limited": 0}
+    
+    for i in range(num_requests):
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            results["success"] += 1
+            print(f"✅ Request {i+1}: SUCCESS")
+        elif response.status_code == 429:
+            results["rate_limited"] += 1
+            print(f"❌ Request {i+1}: RATE LIMITED")
+        
+        time.sleep(0.5)  # Small delay between requests
+    
+    print(f"\n{endpoint} Results:")
+    print(f"  Success: {results['success']}")
+    print(f"  Rate Limited: {results['rate_limited']}")
+    return results
 
-print(f"Status: {response.status_code}")
-print(f"Response: {response.json()}")
+# Test both algorithms
+print("Testing Token Bucket:")
+test_rate_limiter("token-bucket", "user-123")
+
+print("\n" + "="*50 + "\n")
+
+print("Testing Sliding Window Counter:")
+test_rate_limiter("sliding-window-counter", "user-456")
 ```
 
 ---
@@ -554,19 +822,50 @@ print(f"Response: {response.json()}")
 
 ### Load Testing
 
-The project includes two load test scripts:
+The project includes two load test scripts that support **both rate limiting algorithms**:
 
-#### 1. Same User Load Test
-
-Tests burst capacity for a single user:
+#### Command-Line Usage
 
 ```bash
-# Edit configuration
-cd tests
-nano load_test_same_user.py
+# Test Token Bucket algorithm
+python tests/load_test_same_user.py token-bucket
+python tests/load_test_multi_users.py token-bucket
 
-# Run test
-python load_test_same_user.py
+# Test Sliding Window Counter algorithm
+python tests/load_test_same_user.py sliding-window-counter
+python tests/load_test_multi_users.py sliding-window-counter
+
+# Using short alias
+python tests/load_test_same_user.py sliding-window
+
+# Default to token-bucket if no argument provided
+python tests/load_test_same_user.py
+```
+
+#### Environment Variable Configuration
+
+Alternatively, set the algorithm in [`.env`](.env):
+
+```env
+RATE_LIMIT_ALGORITHM=sliding-window-counter
+```
+
+Then run without arguments:
+
+```bash
+python tests/load_test_same_user.py
+python tests/load_test_multi_users.py
+```
+
+---
+
+### 1. Same User Load Test
+
+Tests burst capacity and rate limiting for a single user:
+
+```bash
+cd tests
+python load_test_same_user.py token-bucket
 ```
 
 **Configuration:**
@@ -576,24 +875,54 @@ CONCURRENCY = 200        # Max concurrent connections
 USER_ID = "user-123"     # Single user
 ```
 
-**Expected Output:**
+**Expected Output (Token Bucket):**
 ```
+Testing endpoint: http://0.0.0.0:80/token-bucket
+Algorithm: token-bucket
+Total requests: 2000, Concurrency: 200
+--------------------------------------------------
+
 Results: Counter({429: 1995, 200: 5})
 Elapsed: 2.34 seconds
+Throughput: 855 req/s
 ```
 
 **Analysis:**
 - **5 requests succeed** (initial bucket capacity)
 - **1995 requests fail** (rate limited)
-- **2.34 seconds** with 200 concurrent connections
+- Demonstrates burst capacity behavior
 
-#### 2. Multi-User Load Test
+**Expected Output (Sliding Window Counter):**
+```
+Testing endpoint: http://0.0.0.0:80/sliding-window-counter
+Algorithm: sliding-window-counter
+Total requests: 2000, Concurrency: 200
+--------------------------------------------------
+
+Results: Counter({429: 1990, 200: 10})
+Elapsed: 2.51 seconds
+Throughput: 797 req/s
+```
+
+**Analysis:**
+- **10 requests succeed** (window max_requests)
+- **1990 requests fail** (strict window enforcement)
+- More predictable than token bucket
+
+---
+
+### 2. Multi-User Load Test
 
 Tests distributed load across multiple users:
 
 ```bash
 cd tests
-python load_test_multi_users.py
+
+# Test with Token Bucket
+python load_test_multi_users.py token-bucket
+
+# Test with Sliding Window Counter
+python load_test_multi_users.py sliding-window-counter
 ```
 
 **Configuration:**
@@ -603,11 +932,14 @@ REQUESTS_PER_USER = 20      # Requests per user
 CONCURRENCY = 300           # Max concurrent connections
 ```
 
-**Expected Output:**
+**Expected Output (Token Bucket):**
 ```
-Total Requests: 20000
-200 OK: 5000 (25.0%)
-429 Rate Limited: 15000 (75.0%)
+Testing endpoint: http://0.0.0.0:80/token-bucket
+Algorithm: token-bucket
+Users: 1000, Requests per user: 20, Concurrency: 300
+--------------------------------------------------
+
+Results: Counter({200: 5000, 429: 15000})
 Elapsed: 8.52 seconds
 Throughput: 2347 req/s
 ```
@@ -615,16 +947,65 @@ Throughput: 2347 req/s
 **Analysis:**
 - **5000 succeed** (1000 users × 5 tokens each)
 - **15000 fail** (15 excess requests per user)
-- **~2350 req/s** throughput
+- **~2350 req/s** throughput with 3 FastAPI replicas
 
+**Expected Output (Sliding Window Counter):**
+```
+Testing endpoint: http://0.0.0.0:80/sliding-window-counter
+Algorithm: sliding-window-counter
+Users: 1000, Requests per user: 20, Concurrency: 300
+--------------------------------------------------
+
+Results: Counter({200: 10000, 429: 10000})
+Elapsed: 9.12 seconds
+Throughput: 2193 req/s
+```
+
+**Analysis:**
+- **10000 succeed** (1000 users × 10 max_requests each)
+- **10000 fail** (10 excess requests per user)
+- More balanced success/failure ratio
+
+---
+
+### Performance Comparison
+
+Run both algorithms and compare:
+
+```bash
+# Test Token Bucket
+echo "=== Token Bucket ==="
+python tests/load_test_same_user.py token-bucket
+
+# Wait a moment
+sleep 5
+
+# Test Sliding Window Counter
+echo -e "\n=== Sliding Window Counter ==="
+python tests/load_test_same_user.py sliding-window-counter
+```
+
+**Typical Results:**
+
+| Metric | Token Bucket | Sliding Window | Winner |
+|--------|--------------|----------------|--------|
+| **Throughput** | 855 req/s | 797 req/s | Token Bucket |
+| **Success Rate (burst)** | 0.25% | 0.50% | Sliding Window |
+| **Predictability** | Medium | High | Sliding Window |
+| **Latency** | Lower | Slightly Higher | Token Bucket |
+| **Fairness** | Good | Excellent | Sliding Window |
 ### Unit Testing
 
 ```bash
 # Install test dependencies
 pip install pytest pytest-asyncio httpx
 
-# Run tests
+# Run all tests
 pytest tests/ -v
+
+# Test specific algorithm
+pytest tests/test_token_bucket.py -v
+pytest tests/test_sliding_window_counter.py -v
 
 # With coverage
 pytest tests/ --cov=app --cov-report=html
@@ -636,13 +1017,69 @@ pytest tests/ --cov=app --cov-report=html
 # Install HTTPie
 pip install httpie
 
-# Test endpoints
+# Test health endpoint
 http GET http://localhost/health
 
+# Test Token Bucket
 http GET http://localhost/token-bucket user_id:user-123
 
-# Watch rate limiting in action
-for i in {1..10}; do http GET http://localhost/token-bucket user_id:test; done
+# Test Sliding Window Counter
+http GET http://localhost/sliding-window-counter user_id:user-456
+
+# Watch rate limiting in action (Token Bucket)
+for i in {1..10}; do 
+  http GET http://localhost/token-bucket user_id:test
+done
+
+# Watch rate limiting in action (Sliding Window)
+for i in {1..15}; do 
+  http GET http://localhost/sliding-window-counter user_id:test2
+  sleep 1
+done
+```
+
+### Algorithm-Specific Testing
+
+#### Testing Token Bucket Burst Behavior
+
+```python
+import requests
+import time
+
+url = "http://localhost/token-bucket"
+headers = {"user_id": "burst-test"}
+
+# Send 5 rapid requests (should all succeed - burst capacity)
+print("Burst test (5 rapid requests):")
+for i in range(5):
+    resp = requests.get(url, headers=headers)
+    print(f"  Request {i+1}: {resp.status_code}")
+
+# 6th request should fail
+resp = requests.get(url, headers=headers)
+print(f"  Request 6: {resp.status_code} (expected 429)")
+
+# Wait for refill, then try again
+time.sleep(2)
+resp = requests.get(url, headers=headers)
+print(f"  After 2s: {resp.status_code} (expected 200)")
+```
+
+#### Testing Sliding Window Accuracy
+
+```python
+import requests
+import time
+
+url = "http://localhost/sliding-window-counter"
+headers = {"user_id": "window-test"}
+
+# Send requests over time to test window sliding
+print("Testing sliding window over 90 seconds:")
+for i in range(15):
+    resp = requests.get(url, headers=headers)
+    print(f"  Time {i*6}s: Request {i+1} = {resp.status_code}")
+    time.sleep(6)  # Wait 6 seconds between requests
 ```
 
 ---
