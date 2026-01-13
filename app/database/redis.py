@@ -48,10 +48,12 @@ async def connect_redis():
 
         redis_connection.async_client = redis_asyncio.RedisCluster(
             startup_nodes=startup_nodes,
-            password=settings.redis_password if settings.redis_password else None,
-            decode_responses=True,
-            socket_timeout=5,
-            socket_connect_timeout=5,
+            password=settings.redis_password or None,
+            max_connections=300,
+            socket_timeout=1.0,
+            socket_connect_timeout=0.5,
+            decode_responses=False,
+            health_check_interval=30,
         )
 
         await redis_connection.async_client.ping()
