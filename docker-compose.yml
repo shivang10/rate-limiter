@@ -143,6 +143,63 @@ services:
       - rate_limiter
     networks:
       - my-net
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - my-net
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin}
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/rate-limiter-dashboard.json
+    networks:
+      - my-net
+    depends_on:
+      - prometheus
+      - loki-app
+  loki-app:
+    image: grafana/loki:latest
+    container_name: loki-observer
+    restart: unless-stopped
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - my-net
+
+  promtail-app:
+    image: grafana/promtail:latest
+    container_name: promtail-observer
+    restart: unless-stopped
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["-config.file=/etc/promtail/config.yaml"]
+    depends_on:
+      - loki-app
+    networks:
+      - my-net
 
 volumes:
   redis_data_1:
@@ -152,6 +209,10 @@ volumes:
   redis_data_5:
   redis_data_6:
   cache:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
     driver: local
 
 networks:

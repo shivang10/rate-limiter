@@ -1,10 +1,10 @@
-# Updated main.py
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.database.redis import connect_redis, disconnect_redis
 from app.api.routes import health, token_bucket_route, sliding_window_counter_route
+from prometheus_fastapi_instrumentator import Instrumentator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,3 +39,6 @@ app = FastAPI(
 app.include_router(health.router)
 app.include_router(token_bucket_route.router)
 app.include_router(sliding_window_counter_route.router)
+
+# Initialize Prometheus instrumentation AFTER app is created
+Instrumentator().instrument(app).expose(app)
