@@ -5,9 +5,9 @@ import socket
 from typing import Optional
 
 import redis
-from redis.asyncio.cluster import RedisCluster, ClusterNode
 import redis.asyncio as redis_asyncio
 from fastapi import HTTPException, status
+from redis.asyncio.cluster import RedisCluster, ClusterNode
 
 from app.config import settings
 from app.database.lua import load_lua_script

@@ -2,8 +2,8 @@ import logging
 
 from fastapi import Request, HTTPException, status
 
-from app.core.key_builder import build_user_rate_limit_key
 from app.core.factory import get_sliding_window_counter_rate_limiter
+from app.core.key_builder import build_user_rate_limit_key
 
 logger = logging.getLogger(__name__)
 

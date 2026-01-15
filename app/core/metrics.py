@@ -1,5 +1,6 @@
-from prometheus_client import Counter, Histogram, Gauge
 import time
+
+from prometheus_client import Counter, Histogram, Gauge
 
 # Rate limiter metrics
 rate_limit_requests_total = Counter(

@@ -1,10 +1,11 @@
 import asyncio
-import aiohttp
-import time
 import os
 import sys
-from dotenv import load_dotenv
+import time
 from collections import Counter
+
+import aiohttp
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -56,6 +57,7 @@ async def main():
     print("\nResults:", counts)
     print("Elapsed:", round(elapsed, 2), "seconds")
     print(f"Throughput: {round(TOTAL_REQUESTS / elapsed, 2)} req/s")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

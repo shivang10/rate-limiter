@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 
 from app.database.redis import redis_connection
-from .token_bucket import TokenBucketRateLimiter
 from .sliding_window_counter import SlidingWindowCounterRateLimiter
+from .token_bucket import TokenBucketRateLimiter
 
 logger = logging.getLogger(__name__)
 

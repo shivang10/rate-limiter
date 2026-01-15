@@ -3,19 +3,19 @@ import time
 
 import redis
 
-from app.database.redis import redis_connection
 from app.core.base import RateLimiterStrategy
 from app.core.metrics import (
     MetricsContext, rate_limit_requests_total, rate_limit_allowed,
     rate_limit_rejected, redis_operations_total, redis_script_errors,
     sliding_window_request_count
 )
+from app.database.redis import redis_connection
 
 logger = logging.getLogger(__name__)
 
 
 class SlidingWindowCounterRateLimiter(RateLimiterStrategy):
-    def __init__(self, redis_client, window_size_seconds: int, max_requests: int,  expiry_seconds: int):
+    def __init__(self, redis_client, window_size_seconds: int, max_requests: int, expiry_seconds: int):
         self.redis_client = redis_client
         self.window_size_seconds = window_size_seconds
         self.max_requests = max_requests

@@ -3,19 +3,20 @@ import time
 
 import redis
 
-from app.database.redis import redis_connection, TOKEN_BUCKET_SCRIPT
 from app.core.base import RateLimiterStrategy
 from app.core.metrics import (
     MetricsContext, rate_limit_requests_total, rate_limit_allowed,
     rate_limit_rejected, redis_operations_total, redis_script_errors,
     token_bucket_tokens_remaining
 )
+from app.database.redis import redis_connection, TOKEN_BUCKET_SCRIPT
 
 logger = logging.getLogger(__name__)
 
 
 class TokenBucketRateLimiter(RateLimiterStrategy):
-    def __init__(self, tokens_per_second: int, max_tokens: int, redis_client: redis.Redis, expiry_seconds: int, tokens_per_request: int):
+    def __init__(self, tokens_per_second: int, max_tokens: int, redis_client: redis.Redis, expiry_seconds: int,
+                 tokens_per_request: int):
         self.tokens_per_second = tokens_per_second
         self.max_tokens = max_tokens
         self.redis_client = redis_client

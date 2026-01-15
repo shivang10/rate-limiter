@@ -1,10 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
 
-from app.database.redis import connect_redis, disconnect_redis
-from app.api.routes import health, token_bucket_route, sliding_window_counter_route
+from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
+
+from app.api.routes import health, token_bucket_route, sliding_window_counter_route
+from app.database.redis import connect_redis, disconnect_redis
 
 logging.basicConfig(
     level=logging.INFO,
